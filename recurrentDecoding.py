@@ -32,6 +32,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as spi
 import torch
+import time
+import os
+import json
+
+# For saving numpy arrays into JSON
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
 
 basefolder = r'C:/Users/Tomas/Documents/PhD/OLab/casinoTask/casinoTaskAnalysis/patientData/'
 behavior_folder = basefolder+'allBehavior_intracranial/'
@@ -181,18 +191,48 @@ for sI in np.arange(len(sessions)):
                        'n_outputs':n_outputs,'dropout_coef':0.25,'mode':mode}    
     model = drnn.drnn_decoder(**training_params)
     
+    
+    # Saving analysis params
+    analysis_params = {'training_params': training_params, 'X_train': X_train,
+                       'X_test': X_test, 'y_train': y_train, 'y_test': y_test,
+                       'n_times': n_times, 'regressor_name': regressor_name,
+                       'mode': mode, 'nUnits': nUnits, 'brainAreas': brainAreas,
+                       'nTrials': nTrials, 'windowStarts': windowStarts,
+                       'windowEnds': windowEnds, 'windowSize': windowSize,
+                       'sessionFile': datafolder+filename, 'session': sessions[sI],
+                       'behavior_file': file_name, 'model_name': model_name}    
+    
+    # Saving analysis params
+    save_folder = datafolder + 'saved_drnn_models/'
+    if os.path.isdir(save_folder) == False:
+        os.mkdir(save_folder)
+    timestamp = str(int(time.time()))
+    params_file = save_folder + sessions[sI] + '_' + timestamp + '_analysis_params.json'
+    with open(params_file, 'w', encoding='utf-8') as f:
+        json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
+    
+    '''
     # Loading previously trained model
-    # model = torch.load('saved_models/model_test.pt')
+    model = torch.load('saved_models/model_test.pt')
+    # Loading JSON file
+    with open(params_file) as json_file:
+        data = json.load(json_file)
+    X_train = np.array(data['X_train'])
+    y_train = np.array(data['y_train'])
+    X_test = np.array(data['X_test'])
+    '''
     
     # The model's mode can be classification or regression
     model.fit(X_train,y_train)                
     y_hat_test = model.predict(X_test)
-
+    
     # Saving PyTorch model
-    torch.save(model, 'saved_models/model_test.pt')
+    torch.save(model, save_folder + sessions[sI] + '_' + timestamp + '_checkpoint.pt')
+    
+    
     
     '''
-    
+
     if isClass: # Run gradient boosting classification for discrete variables  
         n_max_estimators = 300
         test_deviance = np.zeros((n_cv,n_max_estimators))
