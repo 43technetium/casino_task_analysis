@@ -211,11 +211,12 @@ for sI in np.arange(len(sessions)):
     with open(params_file, 'w', encoding='utf-8') as f:
         json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
     
-    '''
+    
     # Loading previously trained model
-    model = torch.load('saved_models/model_test.pt')
+    '''    
+    model = torch.load(save_folder + 'P63CS_082519_1580109478_checkpoint.pt')
     # Loading JSON file
-    with open(params_file) as json_file:
+    with open(save_folder + 'P63CS_082519_1580109478_analysis_params.json') as json_file:
         data = json.load(json_file)
     X_train = np.array(data['X_train'])
     y_train = np.array(data['y_train'])
@@ -223,11 +224,12 @@ for sI in np.arange(len(sessions)):
     '''
     
     # The model's mode can be classification or regression
-    model.fit(X_train,y_train)                
-    y_hat_test = model.predict(X_test)
-    
+    model.fit(X_train,y_train)                  
     # Saving PyTorch model
     torch.save(model, save_folder + sessions[sI] + '_' + timestamp + '_checkpoint.pt')
+    
+    y_hat_train = model.predict(X_train,y_train)
+    y_hat_test = model.predict(X_test,y_test)
     
     
     
