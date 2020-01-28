@@ -107,11 +107,11 @@ class drnn_decoder(RegressorMixin):
         self.mode = mode
         
         # Fitting parameters
-        self.n_epochs = 10
+        self.n_epochs = 30
         self.epoch_flip_threshold = 10
-        self.epsilon_s = 0 #0.25
+        self.epsilon_s = 0                                                                                                                                                                             #0.25
         self.epsilon_e = 0     
-        self.regul_coef = 0 
+        self.regul_coef = 0
         self.lr = 0.001          
         self.model = DRNN_Network(
                 self.n_features,self.batch_size,self.n_nodes,self.n_outputs,self.dropout_coef,self.mode)
@@ -130,6 +130,8 @@ class drnn_decoder(RegressorMixin):
         
     # Fit recurrent neural network using backpropagation through time
     def fit(self,X,y):
+        self.model = self.model.to(device)
+        self.model.train()
         loss_by_epoch = []
         series_loss = np.zeros((X.shape[0],X.shape[1],self.n_epochs))
         zero_one_loss = np.zeros((X.shape[0],X.shape[1],self.n_epochs))
@@ -143,9 +145,7 @@ class drnn_decoder(RegressorMixin):
                            self.epoch_flip_threshold)*epochI + self.epsilon_s
             else:
                 epsilon = self.epsilon_e        
-                
-            model = self.model.to(device)
-            model.train()            
+                                        
             # Loading data onto PyTorch's structure
             u_train = Variable(torch.Tensor(X).type(torch.FloatTensor), requires_grad=False)
             f_train = Variable(torch.Tensor(y).type(torch.FloatTensor), requires_grad=False)
@@ -175,13 +175,13 @@ class drnn_decoder(RegressorMixin):
                 # Loop model over time steps adding up loss
                 n_timesteps = u.shape[1]
                 # Adding dropout layer to network, ignoring if dropout is 0
-                if model.dropout_coef > 0:
-                    u = model.dropout_layer(u)                          
+                if self.model.dropout_coef > 0:
+                    u = self.model.dropout_layer(u)                          
                 z_series = input_z.repeat(n_timesteps,1)                                        
                 for timeI in np.arange(n_timesteps):
                     input_f = f[:,timeI]
                     input_u = u[:,timeI,:]
-                    input_z, = model.forward(input_u, input_z, epsilon, input_f, self.enc)
+                    input_z, = self.model.forward(input_u, input_z, epsilon, input_f, self.enc)
                     loss += self.loss_function(input_z.unsqueeze(0),target)
                     z_series[timeI] = input_z
                     
@@ -194,7 +194,7 @@ class drnn_decoder(RegressorMixin):
                     _, predicted = torch.max(z_series[timeI].unsqueeze(0), 1)
                     zero_one_loss[i,timeI,epochI] = torch.abs(predicted-target)
                     series_loss[i,timeI,epochI] = self.loss_function(z_series[timeI].unsqueeze(0),target) 
-            loss_by_epoch.append(running_loss)            
+            loss_by_epoch.append(running_loss)             
         self.loss_by_epoch = loss_by_epoch
         self.zero_one_loss = zero_one_loss
         self.series_loss = series_loss
@@ -252,49 +252,4 @@ class drnn_decoder(RegressorMixin):
         return y_pred_hat
         
         
-        '''
-
-
-        
-        self.model.eval()
-        n_examples = X.shape[0]
-        n_timesteps = X.shape[1]
-        y_pred_hat = np.zeros((n_examples,n_timesteps))        
-        # Loading features to use in prediction
-        u_test = Variable(torch.Tensor(X).type(torch.FloatTensor), requires_grad=False)
-        dataset = data_utils.TensorDataset(u_test)
-        test_dataloader = data_utils.DataLoader(
-                    dataset,batch_size=self.batch_size,shuffle=False,num_workers=0,drop_last=True)
-        for i, data in enumerate(test_dataloader): 
-            print('dataI: ', i) 
-            u = data[0]
-            # Initial state
-            if i == 0:
-                z = torch.Tensor([0.5]).type(torch.FloatTensor)
-            if self.mode == 'classification':              
-                if i == 0:                                                  
-                    one_hot_z = self.enc.fit_transform(z.cpu().reshape((z.shape[0],1)))
-                    input_z = torch.from_numpy(one_hot_z).to(device)                               
-            elif self.mode == 'regression':
-                if i == 0:
-                    input_z = z                        
-                                  
-            self.model.init_hidden()
-            z_series = input_z.repeat(n_timesteps,1)                                        
-            # Time loop
-            for timeI in np.arange(n_timesteps):
-                input_u = u[:,timeI,:]                
-                input_z, = self.model.forward(input_u, input_z, 0, [], self.enc)                    
-                z_series[timeI] = input_z
-        
-            if self.mode == 'classification':
-                _, predicted = torch.max(z_series, 1)
-            else:
-                predicted = z_series
-            y_pred_hat[i,:] = predicted.cpu()
-     
-        return y_pred_hat
-            
-        
-        '''
         

@@ -53,11 +53,11 @@ file_name,model_name = 'smBI_qP_nID_uID_rlAI_scID_selected.mat','sticky-nov-unc'
 behavior_file = behavior_folder+file_name
 behavior_data = spi.loadmat(behavior_file)
 
-#sessions = ['P41CS_100116','P43CS_110816','P47CS_021817','P51CS_070517','P56CS_042118','P56CS_042518','P60CS_100618','P61CS_022119','P62CS_041919','P63CS_082519']
-sessions = ['P63CS_082519']
+sessions = ['P41CS_100116','P43CS_110816','P47CS_021817','P51CS_070517','P56CS_042118','P56CS_042518','P60CS_100618','P61CS_022119','P62CS_041919','P63CS_082519']
+#sessions = ['P60CS_100618']
 # Behavioral data is stored separately, and sessions require an unique ID to be correctly loaded from it
-#session_file_id = [0,1,2,5,9,10,11,12,13,14]
-session_file_id = [14]
+session_file_id = [0,1,2,5,9,10,11,12,13,14]
+#session_file_id = [11]
 
 areaNames = ['HIP','AMY','dACC','preSMA','vmPFC']
 
@@ -208,25 +208,31 @@ for sI in np.arange(len(sessions)):
         os.mkdir(save_folder)
     timestamp = str(int(time.time()))
     params_file = save_folder + sessions[sI] + '_' + timestamp + '_analysis_params.json'
-    with open(params_file, 'w', encoding='utf-8') as f:
-        json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
     
     
     # Loading previously trained model
-    '''    
-    model = torch.load(save_folder + 'P63CS_082519_1580109478_checkpoint.pt')
+    '''
+    model = torch.load(save_folder + 'P63CS_082519_1580113156_checkpoint.pt')
     # Loading JSON file
-    with open(save_folder + 'P63CS_082519_1580109478_analysis_params.json') as json_file:
+    with open(save_folder + 'P63CS_082519_1580113156_analysis_params.json') as json_file:
         data = json.load(json_file)
     X_train = np.array(data['X_train'])
     y_train = np.array(data['y_train'])
     X_test = np.array(data['X_test'])
+    
+    
     '''
+    
     
     # The model's mode can be classification or regression
     model.fit(X_train,y_train)                  
     # Saving PyTorch model
     torch.save(model, save_folder + sessions[sI] + '_' + timestamp + '_checkpoint.pt')
+    with open(params_file, 'w', encoding='utf-8') as f:
+        json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
+    
+    
+    
     
     y_hat_train = model.predict(X_train,y_train)
     y_hat_test = model.predict(X_test,y_test)
@@ -320,6 +326,15 @@ y_hat_test = model.predict(X_test)
 plt.figure()
 plt.plot(y_test,y_hat_test.cpu().detach().numpy(),'bo')
 plt.show()
+
+plt.figure()
+acc_train = y_hat_train==y_train
+acc_test = y_hat_test==y_test
+m_train = np.mean(acc_train,axis=0)
+m_test = np.mean(acc_test,axis=0)
+plt.plot(m_train)
+plt.plot(m_test)
+
 '''
 
 
