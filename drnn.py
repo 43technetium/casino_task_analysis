@@ -75,7 +75,8 @@ class DRNN_Network(nn.Module):
             # Syntax: torch.where(condition, x if condition, else y)
             # z is the sampled output from the RNN (f: ground truth, z:
             # model estimate of f)
-            z = torch.where(p == 0, input_f, z.double())                
+            #z = torch.where(p == 0, input_f, z.double())                
+            z = torch.where(p == 0, input_f, z)                
             z = z.reshape((self.batch_size,self.n_outputs))
         # Updating network's hidden states
         self.x = self.x.cuda()
@@ -109,7 +110,7 @@ class drnn_decoder(RegressorMixin):
         # Fitting parameters
         self.n_epochs = 30
         self.epoch_flip_threshold = 10
-        self.epsilon_s = 0                                                                                                                                                                             #0.25
+        self.epsilon_s = 0.25                                                                                                                                                                   #0.25
         self.epsilon_e = 0     
         self.regul_coef = 0
         self.lr = 0.001          
@@ -117,11 +118,11 @@ class drnn_decoder(RegressorMixin):
                 self.n_features,self.batch_size,self.n_nodes,self.n_outputs,self.dropout_coef,self.mode)
         self.optimizer = torch.optim.Adam(
                 self.model.parameters(),lr=self.lr,weight_decay=self.regul_coef)
+        self.enc = []
         if self.mode == 'regression':        
             self.loss_function = torch.nn.MSELoss()
         elif self.mode == 'classification':
-            self.loss_function = torch.nn.CrossEntropyLoss()
-            self.enc = []
+            self.loss_function = torch.nn.CrossEntropyLoss()            
             # Adding one hot encoder for classification
             category_list = [[0,1]]
             self.enc = OneHotEncoder(handle_unknown='ignore',sparse=False,categories=category_list)
@@ -169,7 +170,7 @@ class drnn_decoder(RegressorMixin):
                     one_hot_z = self.enc.fit_transform(z.cpu().reshape((z.shape[0],1)))
                     input_z = torch.from_numpy(one_hot_z).to(device)                        
                 elif self.mode == 'regression':                    
-                    input_z = z
+                    input_z = z.to(device)
                     target = f[:,0]
                 self.model.init_hidden() 
                 # Loop model over time steps adding up loss
@@ -182,18 +183,26 @@ class drnn_decoder(RegressorMixin):
                     input_f = f[:,timeI]
                     input_u = u[:,timeI,:]
                     input_z, = self.model.forward(input_u, input_z, epsilon, input_f, self.enc)
-                    loss += self.loss_function(input_z.unsqueeze(0),target)
+                    if self.mode == 'classification':                                         
+                        loss += self.loss_function(input_z.unsqueeze(0),target)
+                    elif self.mode == 'regression':
+                        loss += self.loss_function(input_z,target)
                     z_series[timeI] = input_z
-                    
+                z_series = z_series.to(device)
                 loss.backward(retain_graph=True)
                 self.optimizer.step()            
                 running_loss += loss.detach().item()   
                 batch_counter += 1
                 # Getting loss for every timestep
                 for timeI in np.arange(z_series.shape[0]):
-                    _, predicted = torch.max(z_series[timeI].unsqueeze(0), 1)
+                    if self.mode == 'classification':  
+                        _, predicted = torch.max(z_series[timeI].unsqueeze(0), 1)
+                        series_loss[i,timeI,epochI] = self.loss_function(z_series[timeI].unsqueeze(0),target) 
+                    elif self.mode == 'regression':
+                        predicted = z_series[timeI]
+                        series_loss[i,timeI,epochI] = self.loss_function(z_series[timeI],target)
                     zero_one_loss[i,timeI,epochI] = torch.abs(predicted-target)
-                    series_loss[i,timeI,epochI] = self.loss_function(z_series[timeI].unsqueeze(0),target) 
+                     
             loss_by_epoch.append(running_loss)             
         self.loss_by_epoch = loss_by_epoch
         self.zero_one_loss = zero_one_loss
@@ -238,17 +247,23 @@ class drnn_decoder(RegressorMixin):
                 input_z, = self.model.forward(input_u, input_z, 0, [], self.enc)                
                 z_series[timeI] = input_z
                 
+            z_series = z_series.to(device)
             # Getting loss for every timestep
             for timeI in np.arange(z_series.shape[0]):
-                _, predicted = torch.max(z_series[timeI].unsqueeze(0), 1)
+                if self.mode == 'classification':  
+                    _, predicted = torch.max(z_series[timeI].unsqueeze(0), 1)
+                    series_loss[i,timeI] = self.loss_function(z_series[timeI].unsqueeze(0),target) 
+                elif self.mode == 'regression':
+                    predicted = z_series[timeI]
+                    series_loss[i,timeI] = self.loss_function(z_series[timeI],target)
                 zero_one_loss[i,timeI] = torch.abs(predicted-target)
-                series_loss[i,timeI] = self.loss_function(z_series[timeI].unsqueeze(0),target)
-                
+            
             if self.mode == 'classification':
                 _, predicted = torch.max(z_series, 1)
             else:
                 predicted = z_series
-            y_pred_hat[i,:] = predicted.cpu()
+            with torch.no_grad():
+                y_pred_hat[i,:] = predicted.cpu().squeeze()             
         return y_pred_hat
         
         

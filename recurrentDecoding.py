@@ -19,6 +19,10 @@ In this implementation, I chose single unit spikes. Additional feature
 construction steps can be added in the pre-processing section.
 
 v2: incorporated structure from gbDecoding
+
+To-do: 
+    implement bayesian hyperparameter search
+    implement random permutation tests
 """
 
 ###############################################################################
@@ -35,6 +39,7 @@ import torch
 import time
 import os
 import json
+import scipy.special as sps
 
 # For saving numpy arrays into JSON
 class NumpyEncoder(json.JSONEncoder):
@@ -54,10 +59,10 @@ behavior_file = behavior_folder+file_name
 behavior_data = spi.loadmat(behavior_file)
 
 sessions = ['P41CS_100116','P43CS_110816','P47CS_021817','P51CS_070517','P56CS_042118','P56CS_042518','P60CS_100618','P61CS_022119','P62CS_041919','P63CS_082519']
-#sessions = ['P60CS_100618']
+sessions = ['P60CS_100618']
 # Behavioral data is stored separately, and sessions require an unique ID to be correctly loaded from it
 session_file_id = [0,1,2,5,9,10,11,12,13,14]
-#session_file_id = [11]
+session_file_id = [11]
 
 areaNames = ['HIP','AMY','dACC','preSMA','vmPFC']
 
@@ -139,33 +144,47 @@ for sI in np.arange(len(sessions)):
 
     # Getting variable to decode    
     # Categorical regressors
-    regressor_name, mode = 'outcome', 'classification'
+    # regressor_name, mode = 'outcome', 'classification'
     # regressor_name, isClass = 'decisionCategory', True
     # regressor_name, isClass = 'respKey', True
     
     # Continuous regressors
     # regressor_name, isClass = 'select_qVals', False
     # regressor_name, isClass = 'pChoice', False
-    # regressor_name, isClass = 'diff_qVals', False
+    regressor_name, mode = 'diff_qVals', 'regression'
     # regressor_name, isClass = 'diff_stimUtil', False
     # regressor_name, isClass = 'reject_qVals', False
-    # regressor_name, isClass = 'select_stimUtil', False
+    # regressor_name, mode = 'select_stimUtil', 'regression'
     # regressor_name, isClass = 'reject_stimUtil', False
     # regressor_name, isClass = 'select_rlActVal', False
-    # regressor_name, isClass = 'select_uUtil', False
+    # regressor_name, mode = 'select_uUtil', 'regression'
     # regressor_name, isClass = 'diff_uUtil', False
     # regressor_name, isClass = 'reject_uUtil', False
     # regressor_name, isClass = 'RPE', False
     # regressor_name, isClass = 'outcome', False
     # regressor_name, isClass = 'select_nVal', False
-    
+       
     
     # Setting up training and testing folds
     # X = trialReferencedSpikes
-    # X = preDecisionSpikes
-    X = postOutcomeSpikes
+    X = preDecisionSpikes
+    # X = postOutcomeSpikes
     # X = all_preResponseSpikes/trialResponseTime[:,None]
     # X = preDecisionSpikes_normalized    
+    
+    # Slicing by brain area
+    selectAllRegions = True
+    # Getting brain area 
+    if selectAllRegions:
+        chosenBrainArea = 'ALL'
+    else:
+        # ['HIP' 1,'AMY' 3,'dACC' 5,'preSMA' 7,'vmPFC' 9]
+        chosen_area_idx = 9
+        chosenBrainArea = areaNames[int(chosen_area_idx/2)]    
+        X = X[:,:,np.squeeze(brainAreas == chosen_area_idx)]
+    
+    if X.shape[2] == 0:
+        continue
     
     regressor = np.squeeze(behavior_data['fitResults'][0,0]['latents'][0,session_file_id[sI]][regressor_name])
     regressor[np.isnan(regressor)] = 0    
@@ -173,10 +192,14 @@ for sI in np.arange(len(sessions)):
     
     # Clearing nans
     regressor[np.isnan(regressor)] = 0
+    # Transforming regressor to [0,1] space if regression
+    if mode == 'regression':
+        regressor = sps.expit(regressor) 
     # Adding repetitions over time to outcome vector
     regressor = regressor.reshape(len(regressor),1)
     n_times = X.shape[1]
     regressor = np.tile(regressor,n_times)
+    
     
     
     X_train, X_test, y_train, y_test = train_test_split(X, regressor, test_size=0.2)    
@@ -203,11 +226,11 @@ for sI in np.arange(len(sessions)):
                        'behavior_file': file_name, 'model_name': model_name}    
     
     # Saving analysis params
-    save_folder = datafolder + 'saved_drnn_models/'
+    save_folder = datafolder + 'saved_drnn_models/' + regressor_name + '/' + chosenBrainArea + '/'
     if os.path.isdir(save_folder) == False:
-        os.mkdir(save_folder)
+        os.makedirs(save_folder)
     timestamp = str(int(time.time()))
-    params_file = save_folder + sessions[sI] + '_' + timestamp + '_analysis_params.json'
+    params_file = save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_analysis_params.json'
     
     
     # Loading previously trained model
@@ -227,7 +250,7 @@ for sI in np.arange(len(sessions)):
     # The model's mode can be classification or regression
     model.fit(X_train,y_train)                  
     # Saving PyTorch model
-    torch.save(model, save_folder + sessions[sI] + '_' + timestamp + '_checkpoint.pt')
+    torch.save(model, save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_checkpoint.pt')
     with open(params_file, 'w', encoding='utf-8') as f:
         json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
     
