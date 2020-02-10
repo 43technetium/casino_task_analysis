@@ -66,17 +66,18 @@ class DRNN_Network(nn.Module):
             p = torch.from_numpy(p)
             p = p.to(device)
             # One-hot encode f to serve as input to network
+            # Syntax: torch.where(condition, x if condition, else y)
+            # z is the sampled output from the RNN (f: ground truth, z:
+            # model estimate of f)  
             if self.mode == 'classification':                     
                 one_hot_f = enc.fit_transform(f.cpu().reshape((f.shape[0],1)))
-                input_f = torch.from_numpy(one_hot_f).to(device)       
+                input_f = torch.from_numpy(one_hot_f).to(device)   
+                z = torch.where(p == 0, input_f, z.double())  
                 p = p.reshape((p.shape[0],1))
             elif self.mode == 'regression':
                 input_f = f
-            # Syntax: torch.where(condition, x if condition, else y)
-            # z is the sampled output from the RNN (f: ground truth, z:
-            # model estimate of f)
-            #z = torch.where(p == 0, input_f, z.double())                
-            z = torch.where(p == 0, input_f, z)                
+                z = torch.where(p == 0, input_f, z)               
+                
             z = z.reshape((self.batch_size,self.n_outputs))
         # Updating network's hidden states
         self.x = self.x.cuda()
@@ -98,22 +99,22 @@ class DRNN_Network(nn.Module):
 ###############################################################################
 
 class drnn_decoder(RegressorMixin):
-    def __init__(self,n_features,batch_size,n_nodes,n_outputs,dropout_coef,mode):
+    def __init__(self,n_features,batch_size,n_nodes,n_outputs,dropout_coef,mode,epsilon_s,lr):
         # Model parameters
         self.n_features = n_features
         self.batch_size = batch_size
         self.n_nodes = n_nodes
         self.n_outputs = n_outputs
-        self.dropout_coef = dropout_coef     
+        self.dropout_coef = dropout_coef             
         self.mode = mode
+        self.epsilon_s = epsilon_s
+        self.lr = lr
         
         # Fitting parameters
-        self.n_epochs = 30
+        self.n_epochs = 10
         self.epoch_flip_threshold = 10
-        self.epsilon_s = 0.25                                                                                                                                                                   #0.25
         self.epsilon_e = 0     
-        self.regul_coef = 0
-        self.lr = 0.001          
+        self.regul_coef = 0        
         self.model = DRNN_Network(
                 self.n_features,self.batch_size,self.n_nodes,self.n_outputs,self.dropout_coef,self.mode)
         self.optimizer = torch.optim.Adam(

@@ -40,6 +40,13 @@ import time
 import os
 import json
 import scipy.special as sps
+from sklearn.metrics import r2_score
+from sklearn.metrics import accuracy_score
+from hyperopt import hp, fmin, tpe, space_eval
+
+###############################################################################
+# Classes and helper functions
+###############################################################################
 
 # For saving numpy arrays into JSON
 class NumpyEncoder(json.JSONEncoder):
@@ -47,6 +54,26 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
+    
+def train_model(args):
+    lr, epsilon_s, dropout_coef, n_outputs, mode, X_train, y_train, X_test, y_test = args    
+    training_params = {'n_features':X_train.shape[2],'batch_size':1,'n_nodes':20,
+                   'n_outputs':n_outputs,'dropout_coef':dropout_coef,
+                   'mode':mode,'epsilon_s':epsilon_s, 'lr':lr}      
+    model = drnn.drnn_decoder(**training_params)
+    # The model's mode can be classification or regression
+    model.fit(X_train,y_train)                          
+    y_hat_test = model.predict(X_test,y_test)
+    if mode == 'regression':
+        acc = -1.0*r2_score(y_test,y_hat_test)
+    elif mode == 'classification':
+        acc = -1.0*accuracy_score(y_test,y_hat_test)
+    return acc 
+
+
+###############################################################################
+# Data setup
+###############################################################################
 
 basefolder = r'C:/Users/Tomas/Documents/PhD/OLab/casinoTask/casinoTaskAnalysis/patientData/'
 behavior_folder = basefolder+'allBehavior_intracranial/'
@@ -144,14 +171,14 @@ for sI in np.arange(len(sessions)):
 
     # Getting variable to decode    
     # Categorical regressors
-    # regressor_name, mode = 'outcome', 'classification'
+    regressor_name, mode = 'outcome', 'classification'
     # regressor_name, isClass = 'decisionCategory', True
     # regressor_name, isClass = 'respKey', True
     
     # Continuous regressors
     # regressor_name, isClass = 'select_qVals', False
     # regressor_name, isClass = 'pChoice', False
-    regressor_name, mode = 'diff_qVals', 'regression'
+    # regressor_name, mode = 'diff_qVals', 'regression'
     # regressor_name, isClass = 'diff_stimUtil', False
     # regressor_name, isClass = 'reject_qVals', False
     # regressor_name, mode = 'select_stimUtil', 'regression'
@@ -198,40 +225,28 @@ for sI in np.arange(len(sessions)):
     # Adding repetitions over time to outcome vector
     regressor = regressor.reshape(len(regressor),1)
     n_times = X.shape[1]
-    regressor = np.tile(regressor,n_times)
-    
-    
-    
+    regressor = np.tile(regressor,n_times)    
     X_train, X_test, y_train, y_test = train_test_split(X, regressor, test_size=0.2)    
-
     if mode == 'classification':
         n_classes = 2
         n_outputs = n_classes
     elif mode == 'regression':
         n_outputs = 1
     
-    training_params = {'n_features':X.shape[2],'batch_size':1,'n_nodes':10,
-                       'n_outputs':n_outputs,'dropout_coef':0.25,'mode':mode}    
-    model = drnn.drnn_decoder(**training_params)
+    ###########################################################################
+    # Training model
+    ###########################################################################    
+    # Define a hyperparameter search space
+    model_space = [hp.uniform('lr', 0.0001, 0.01), hp.uniform('epsilon_s', 0, 0.4), 
+             hp.uniform('dropout_coef', 0, 0.3),
+             n_outputs, mode,
+             X_train,y_train,X_test,y_test]
     
-    
-    # Saving analysis params
-    analysis_params = {'training_params': training_params, 'X_train': X_train,
-                       'X_test': X_test, 'y_train': y_train, 'y_test': y_test,
-                       'n_times': n_times, 'regressor_name': regressor_name,
-                       'mode': mode, 'nUnits': nUnits, 'brainAreas': brainAreas,
-                       'nTrials': nTrials, 'windowStarts': windowStarts,
-                       'windowEnds': windowEnds, 'windowSize': windowSize,
-                       'sessionFile': datafolder+filename, 'session': sessions[sI],
-                       'behavior_file': file_name, 'model_name': model_name}    
-    
-    # Saving analysis params
-    save_folder = datafolder + 'saved_drnn_models/' + regressor_name + '/' + chosenBrainArea + '/'
-    if os.path.isdir(save_folder) == False:
-        os.makedirs(save_folder)
-    timestamp = str(int(time.time()))
-    params_file = save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_analysis_params.json'
-    
+    best = fmin(fn=train_model,
+        space=model_space,
+        algo=tpe.suggest,
+        max_evals=100)
+
     
     # Loading previously trained model
     '''
@@ -245,20 +260,48 @@ for sI in np.arange(len(sessions)):
     
     
     '''
-    
-    
+    dropout_coef = best['dropout_coef']
+    epsilon_s = best['epsilon_s']
+    lr = best['lr']
+    best_training_params = {'n_features':X_train.shape[2],'batch_size':1,'n_nodes':20,
+                   'n_outputs':n_outputs,'dropout_coef':dropout_coef,
+                   'mode':mode,'epsilon_s':epsilon_s, 'lr':lr}      
+    best_model = drnn.drnn_decoder(**best_training_params)
     # The model's mode can be classification or regression
-    model.fit(X_train,y_train)                  
+    best_model.fit(X_train,y_train)    
+    
+    y_hat_train = best_model.predict(X_train,y_train)
+    y_hat_test = best_model.predict(X_test,y_test)
+    
+    if mode == 'regression':
+        acc_train = r2_score(y_train,y_hat_train)
+        acc_test = r2_score(y_test,y_hat_test)
+    elif mode == 'classification':
+        acc_train = accuracy_score(y_train,y_hat_train)
+        acc_test = accuracy_score(y_test,y_hat_test)
+    
+    # Saving analysis params
+    analysis_params = {'best_training_params': best_training_params, 'X_train': X_train,
+                       'X_test': X_test, 'y_train': y_train, 'y_test': y_test,
+                       'n_times': n_times, 'regressor_name': regressor_name,
+                       'mode': mode, 'nUnits': nUnits, 'brainAreas': brainAreas,
+                       'nTrials': nTrials, 'windowStarts': windowStarts,
+                       'windowEnds': windowEnds, 'windowSize': windowSize,
+                       'sessionFile': datafolder+filename, 'session': sessions[sI],
+                       'behavior_file': file_name, 'model_name': model_name}
+    save_folder = datafolder + 'saved_drnn_models/' + regressor_name + '/' + chosenBrainArea + '/'
+    if os.path.isdir(save_folder) == False:
+        os.makedirs(save_folder)
+    timestamp = str(int(time.time()))
+    params_file = save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_analysis_params.json'
     # Saving PyTorch model
-    torch.save(model, save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_checkpoint.pt')
+    torch.save(best_model, save_folder + sessions[sI] + '_' + regressor_name + '_' + chosenBrainArea  + '_' + timestamp + '_checkpoint.pt')
     with open(params_file, 'w', encoding='utf-8') as f:
         json.dump(analysis_params, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
+        
     
     
     
-    
-    y_hat_train = model.predict(X_train,y_train)
-    y_hat_test = model.predict(X_test,y_test)
     
     
     
